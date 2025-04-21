@@ -6,7 +6,7 @@ const getCAClient = () => {
 
     const tlsOptions = {
         trustedRoots: [],
-        verify: false, // Ignorar verificação de certificado
+        verify: false, 
         rejectUnauthorized: false,
         agent: new https.Agent({
             rejectUnauthorized: false

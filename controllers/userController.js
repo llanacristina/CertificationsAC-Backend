@@ -9,26 +9,28 @@ const jwt = require('jsonwebtoken');
 const walletPath = path.join(process.cwd(), 'wallet');
 const SECRET_KEY = process.env.SECRET_KEY
 
-const generateToken = (userId) => {
-    return jwt.sign({ userId }, SECRET_KEY, { expiresIn: '2h' });
-};
+const generateToken = (userId, email, role) => {
+    return jwt.sign({ userId, email, role }, SECRET_KEY, { expiresIn: '2h' });
+  };
 
 // Função de Registro
 const register = async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, name, email } = req.body; 
         const userId = uuidv4();
 
-        const userIdentity = await registerUser(userId, username, password);
+        const userIdentity = await registerUser(userId, username, password, name, email);
 
-        const token = generateToken(userId); 
+        const token = generateToken(userId);
 
         res.status(200).json({
             message: 'Usuário registrado com sucesso!',
-            token, 
-            userId,
+            token,
+            userId, 
             certificate: userIdentity.credentials.certificate,
             privateKey: userIdentity.credentials.privateKey,
+            name,
+            email, 
         });
     } catch (error) {
         console.error('Erro ao registrar usuário:', error);
@@ -39,15 +41,23 @@ const register = async (req, res) => {
 // Função de Login
 const login = async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { email, password } = req.body; 
         const wallet = await Wallets.newFileSystemWallet(walletPath);
 
-        const userExists = await wallet.get(username);
+        if (email === 'admin' && password === process.env.ADMIN_PASSWORD) {
+            const token = generateToken('admin', 'admin', 'admin');
+            return res.status(200).json({
+                message: 'Login bem-sucedido!',
+                token,
+            });
+        }
+
+        const userExists = await wallet.get(email);
         if (!userExists) {
             return res.status(404).json({ message: 'Usuário não encontrado. Por favor, registre-se.' });
         }
 
-        const token = generateToken(username); 
+        const token = generateToken(email, email, 'user'); 
 
         res.status(200).json({
             message: 'Login bem-sucedido!',
@@ -59,36 +69,39 @@ const login = async (req, res) => {
     }
 };
 
-// Função para Listar Usuários (Protegida pelo middleware)
+// Função para listar usuários com status do certificado
+// const checkCertificateStatus = (certificateData) => {
+//       if (certificateData.includes("Certificado revogado")) {
+//         return 'Certificado revogado';
+//     }
+
+//     // Se não foi revogado, então o certificado é considerado válido
+//     return 'Certificado válido';
+// };
+
+// Função para listar usuários com status do certificado
 const listUsers = async (req, res) => {
     try {
-        const authHeader = req.headers.authorization;
-        const token = authHeader && authHeader.split(' ')[1];
+        const walletPath = path.join(process.cwd(), 'wallet');
+        const wallet = await Wallets.newFileSystemWallet(walletPath);
+        const identities = await wallet.list();
 
-        if (!token) {
-            return res.status(401).json({ message: 'Token não fornecido' });
-        }
+        const users = await Promise.all(identities.map(async (identity) => {
+            const userIdentity = await wallet.get(identity);
+            const certificate = userIdentity.credentials.certificate; 
+            let status = 'Certificado válido'; 
 
-        jwt.verify(token, SECRET_KEY, async (err) => {
-            if (err) {
-                return res.status(403).json({ message: 'Token inválido' });
+            if (certificate.includes("Certificado revogado")) {
+                status = 'Certificado revogado';
             }
-
-            const wallet = await Wallets.newFileSystemWallet(walletPath);
-            const identities = await wallet.list();
-
-            const users = await Promise.all(identities.map(async (identity) => {
-                const userIdentity = await wallet.get(identity);
-                return {
-                    id: identity,
-                    certificate: userIdentity.credentials.certificate,
-                };
-            }));
-
-            res.status(200).json(users);
-        });
+            return {
+                id: identity,
+                certificate: certificate,  
+                status: status, 
+            };
+        }));
+        res.status(200).json(users);
     } catch (error) {
-        console.error('Erro ao listar usuários:', error);
         res.status(500).json({ error: error.message });
     }
 };
